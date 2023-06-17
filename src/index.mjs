@@ -76,7 +76,7 @@ function isEnabled (name) {
 
 let lastColour = -1
 function getColour (name) {
-  const colours = '20,82,165,226,81,160,69,158,90,222,51,1,2,3,4,5,6'
+  const colours = '20,46,165,226,81,160,27,28,90,214,51,1,2,3,4,5,6'
     .split(',')
     .map(x => parseInt(x, 10))
   lastColour = (lastColour + 1) % colours.length
@@ -85,7 +85,7 @@ function getColour (name) {
 
 function getColourCodes (c) {
   const CSI = '\x1b['
-  const start = CSI + (c < 8 ? `${c + 30};22m` : `38;5;${c};1m`)
+  const start = CSI + (c < 8 ? `${c + 30};1m` : `38;5;${c};1m`)
   const end = CSI + '39;22m'
   return { start, end }
 }
