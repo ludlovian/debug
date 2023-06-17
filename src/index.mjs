@@ -13,7 +13,7 @@ function makeDebugger (name) {
   const config = {
     name,
     ...getColourCodes(getColour(name)),
-    pfxDate: !isTTY,
+    pfxDate: !isTTY && !process.env.DEBUG_HIDE_DATE,
     sfxTime: isTTY,
     colour: isTTY,
     enabled: isEnabled(name)
