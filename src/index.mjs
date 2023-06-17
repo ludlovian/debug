@@ -19,11 +19,19 @@ function makeDebugger (name) {
     enabled: isEnabled(name)
   }
   const fn = logger.bind(config)
-  Object.defineProperty(fn, 'config', {
-    value: config,
-    writable: false,
-    configurable: false,
-    enumerable: false
+  Object.defineProperties(fn, {
+    config: {
+      value: config,
+      writable: false,
+      configurable: false,
+      enumerable: false
+    },
+    enabled: {
+      get: () => config.enabled,
+      set: x => (config.enabled = !!x),
+      configurable: false,
+      enumerable: false
+    }
   })
   cache.set(name, fn)
 }
@@ -66,20 +74,13 @@ function isEnabled (name) {
   }
 }
 
+let lastColour = -1
 function getColour (name) {
-  const allColours = (
-    '20,21,26,27,32,33,38,39,40,41,42,43,44,45,56,57,62,63,68,69,74,75,76,' +
-    '77,78,79,80,81,92,93,98,99,112,113,128,129,134,135,148,149,160,161,' +
-    '162,163,164,165,166,167,168,169,170,171,172,173,178,179,184,185,196,' +
-    '197,198,199,200,201,202,203,204,205,206,207,208,209,214,215,220,221'
-  )
+  const colours = '20,82,165,226,81,160,69,158,90,222,51,1,2,3,4,5,6'
     .split(',')
     .map(x => parseInt(x, 10))
-  const hash = s => Array.from(s).reduce(
-    (h, ch) => ((h << 5) - h + ch.charCodeAt(0)) & 0xfffffff,
-    0
-  )
-  return allColours[hash(name) % allColours.length]
+  lastColour = (lastColour + 1) % colours.length
+  return colours[lastColour]
 }
 
 function getColourCodes (c) {
