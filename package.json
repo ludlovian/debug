@@ -1,6 +1,6 @@
 {
   "name": "debug",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Simple debug library",
   "type": "module",
   "exports": "./src/index.mjs",
