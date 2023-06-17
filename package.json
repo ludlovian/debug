@@ -1,0 +1,16 @@
+{
+  "name": "debug",
+  "version": "0.0.1",
+  "description": "Simple debug library",
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "main": "src/index.js",
+  "scripts": {
+    "clean": "rm -rf coverage/ node_modules/.cache/",
+    "format": "prettier-standard '{src,test}/**/*.mjs'",
+    "lint": "standard '{src,test}/**/*.mjs' | snazzy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Unlicense"
+}
