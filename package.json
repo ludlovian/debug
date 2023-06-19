@@ -1,5 +1,5 @@
 {
-  "name": "debug",
+  "name": "@ludlovian/debug",
   "version": "0.0.5",
   "description": "Simple debug library",
   "type": "module",
