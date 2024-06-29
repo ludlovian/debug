@@ -2,128 +2,139 @@ import process from 'node:process'
 import { format } from 'node:util'
 
 const isTTY = !!process.stdout && !!process.stdout.isTTY
+const pfxDate = !isTTY && !process.env.DEBUG_HIDE_DATE
+const sfxTime = isTTY
+
+class LogHistory {
+  max = 100
+  items = []
+
+  add (data) {
+    const n = this.items.push(data)
+    if (n > this.max) this.items.splice(0, n - this.max)
+  }
+}
 
 class Logger {
-  name = ''
-  pfxDate = !isTTY && !process.env.DEBUG_HIDE_DATE
-  sfxTime = isTTY
-  start = ''
-  end = ''
-  enabled = false
-  _colour = undefined
+  static history = new LogHistory()
 
-  constructor (name) {
-    this.name = name
-    this.colour = isTTY ? Logger.getColour() : undefined
-    this.enabled = Logger.isEnabled(name)
-
-    this.log = this.log.bind(this)
-    Object.defineProperties(this.log, {
-      config: {
-        get: () => this,
-        configurable: false,
-        enumerable: false
-      },
-      enabled: {
-        get: () => this.enabled,
-        set: x => (this.enabled = !!x),
-        configurable: false,
-        enumerable: false
-      }
-    })
-  }
-
-  get colour () {
-    return this._colour
-  }
-
-  set colour (c) {
-    this._colour = c
-    const { start, end } = Logger.getColourCodes(c)
-    this.start = start
-    this.end = end
-  }
-
-  log (...args) {
-    if (!this.enabled) return
-    const now = new Date()
-    const last = this.last
-    this.last = +now
-    const useColour = this.colour != null
-    const start = useColour ? this.start : ''
-    const end = useColour ? this.end : ''
-    const name = start + this.name + end + ' '
-    const pfx = this.pfxDate ? now.toISOString() + ' ' : ''
-    const sfx =
-      this.sfxTime && last != null
-        ? ` ${start}+${Logger.fmtTime(this.last - last)}${end}`
-        : ''
-    const str = format(...args)
-    console.log(pfx + name + str + sfx)
-  }
-
-  // Logger creation
+  name
+  #last
+  #start
+  #end
+  #colour
+  enabled
 
   static cache = new Map()
 
+  // construction
+  //
   static createDebug (name) {
     if (!this.cache.has(name)) this.cache.set(name, new Logger(name))
     return this.cache.get(name).log
   }
 
-  // Static helper functions
+  constructor (name) {
+    this.name = name
+    this.colour = isTTY ? getColour() : undefined
+    this.enabled = isEnabled(name)
+    this.log = this.log.bind(this)
 
-  static isEnabled (name) {
-    if (name.endsWith('*')) return true
-    const env = process.env.DEBUG
-    if (!env) return false
-    let enabled = false
-
-    for (const elem of env.split(',')) {
-      enabled = enabled || Logger.match(elem, name)
-      if (elem.startsWith('-') && Logger.match(elem.slice(1), name)) {
-        enabled = false
-      }
-    }
-    return enabled
+    Object.defineProperties(this.log, {
+      config: { get: () => this },
+      enabled: { get: () => this.enabled, set: x => (this.enabled = !!x) }
+    })
   }
 
-  static match (pattern, actual) {
-    return (
-      pattern === '*' ||
-      pattern === actual ||
-      (pattern.endsWith('*') && actual.startsWith(pattern.slice(0, -1)))
-    )
+  get colour () {
+    return this.#colour
   }
 
-  static getColourCodes (c) {
-    const CSI = '\x1b['
-    const start = CSI + (c < 8 ? `${c + 30};1m` : `38;5;${c};1m`)
-    const end = CSI + '39;22m'
-    return { start, end }
+  set colour (c) {
+    this.#colour = c
+    const { start, end } = getColourCodes(c)
+    this.#start = start
+    this.#end = end
   }
 
-  static colours = '20,46,165,226,81,160,27,28,90,214,51,1,2,3,4,5,6'
-    .split(',')
-    .map(x => parseInt(x, 10))
-
-  static _lastColourIndex = -1
-
-  static getColour () {
-    this._lastColourIndex = (this._lastColourIndex + 1) % this.colours.length
-    return this.colours[this._lastColourIndex]
-  }
-
-  static SEC = 1e3
-  static MIN = this.SEC * 60
-  static HR = this.MIN * 60
-
-  static fmtTime (ms) {
-    if (ms < this.SEC) return ms + 'ms'
-    if (ms < this.MIN) return ((ms / this.SEC + 0.5) | 0) + 's'
-    if (ms < this.HR) return ((ms / this.MIN + 0.5) | 0) + 'm'
-    return ((ms / this.HR + 0.5) | 0) + 'h'
+  log (...args) {
+    if (!this.enabled) return
+    const now = new Date()
+    const last = this.#last
+    this.#last = +now
+    const useColour = this.#colour != null
+    const start = useColour ? this.#start : ''
+    const end = useColour ? this.#end : ''
+    const name = start + this.name + end + ' '
+    const pfx = pfxDate ? now.toISOString() + ' ' : ''
+    const sfx =
+      sfxTime && last != null
+        ? ` ${start}+${fmtTime(this.#last - last)}${end}`
+        : ''
+    const str = format(...args)
+    Logger.history.add({ when: now, who: this.name, log: str })
+    console.log(pfx + name + str + sfx)
   }
 }
 
-export default Logger.createDebug.bind(Logger)
+// -------------------------------------------
+// Helper functions
+
+function isEnabled (name) {
+  if (name.endsWith('*')) return true
+  const env = process.env.DEBUG
+  if (!env) return false
+  let enabled = false
+
+  for (const elem of env.split(',')) {
+    enabled = enabled || match(elem, name)
+    if (elem.startsWith('-') && match(elem.slice(1), name)) {
+      enabled = false
+    }
+  }
+  return enabled
+}
+
+function match (pattern, actual) {
+  return (
+    pattern === '*' ||
+    pattern === actual ||
+    (pattern.endsWith('*') && actual.startsWith(pattern.slice(0, -1)))
+  )
+}
+
+function getColourCodes (c) {
+  const CSI = '\x1b['
+  const start = CSI + (c < 8 ? `${c + 30};1m` : `38;5;${c};1m`)
+  const end = CSI + '39;22m'
+  return { start, end }
+}
+
+const colours = '20,46,165,226,81,160,27,28,90,214,51,1,2,3,4,5,6'
+  .split(',')
+  .map(x => parseInt(x, 10))
+
+let lastColourIndex = -1
+
+function getColour () {
+  lastColourIndex = (lastColourIndex + 1) % colours.length
+  return colours[lastColourIndex]
+}
+
+const SEC = 1e3
+const MIN = SEC * 60
+const HR = MIN * 60
+
+function fmtTime (ms) {
+  if (ms < SEC) return ms + 'ms'
+  if (ms < MIN) return ((ms / SEC + 0.5) | 0) + 's'
+  if (ms < HR) return ((ms / MIN + 0.5) | 0) + 'm'
+  return ((ms / HR + 0.5) | 0) + 'h'
+}
+
+// -------------------------------------------
+// Exports
+
+const debug = Logger.createDebug.bind(Logger)
+debug.history = Logger.history
+export default debug
