@@ -2,8 +2,9 @@ import process from 'node:process'
 import { format } from 'node:util'
 
 const isTTY = !!process.stdout && !!process.stdout.isTTY
-const pfxDate = !isTTY && !process.env.DEBUG_HIDE_DATE
-const sfxTime = isTTY
+const pfxDate =
+  (!isTTY && !process.env.DEBUG_HIDE_DATE) || !!process.env.DEBUG_ADD_DATE
+const sfxTime = isTTY && !pfxDate
 
 class LogHistory {
   max = 100
