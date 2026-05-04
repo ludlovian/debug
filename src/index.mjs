@@ -133,9 +133,17 @@ function fmtTime (ms) {
   return ((ms / HR + 0.5) | 0) + 'h'
 }
 
+function enableAll (onOff, pfx) {
+  for (const logger of Logger.cache.values()) {
+    if (pfx && !logger.name.startsWith(pfx)) continue //
+    logger.enabled = !!onOff
+  }
+}
+
 // -------------------------------------------
 // Exports
 
 const debug = Logger.createDebug.bind(Logger)
 debug.history = Logger.history
+export { enableAll }
 export default debug
