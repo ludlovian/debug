@@ -1,7 +1,7 @@
 import process from 'node:process'
 import { format } from 'node:util'
 
-const isTTY = !!process.stdout && !!process.stdout.isTTY
+const isTTY = !!process.stderr && !!process.stderr.isTTY
 const pfxDate =
   (!isTTY && !process.env.DEBUG_HIDE_DATE) || !!process.env.DEBUG_ADD_DATE
 const sfxTime = isTTY && !pfxDate
@@ -74,7 +74,7 @@ class Logger {
         : ''
     const str = format(...args)
     Logger.history.add({ when: now, who: this.name, log: str })
-    console.log(pfx + name + str + sfx)
+    console.error(pfx + name + str + sfx)
   }
 }
 
