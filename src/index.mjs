@@ -2,9 +2,13 @@ import process from 'node:process'
 import { format } from 'node:util'
 
 const isTTY = !!process.stderr && !!process.stderr.isTTY
+const isUnderSystemd = !!process.env.INVOCATION_ID || process.env.JOURNAL_STREAM
 const pfxDate =
-  (!isTTY && !process.env.DEBUG_HIDE_DATE) || !!process.env.DEBUG_ADD_DATE
+  !!process.env.DEBUG_ADD_DATE ||
+  (!isTTY && !isUnderSystemd && !process.env.DEBUG_HIDE_DATE)
 const sfxTime = isTTY && !pfxDate
+
+const MSG_PREFIX = isUnderSystemd ? '<6>' : ''
 
 class LogHistory {
   max = 100
@@ -16,8 +20,16 @@ class LogHistory {
   }
 }
 
+function Debug (name) {
+  if (!Logger.cache.has(name)) Logger.cache.set(name, new Logger(name))
+  return Logger.cache.get(name).log
+}
+
+Debug.write = console.error.bind(console)
+
 class Logger {
   static history = new LogHistory()
+  static cache = new Map()
 
   name
   #last
@@ -25,15 +37,6 @@ class Logger {
   #end
   #colour
   enabled
-
-  static cache = new Map()
-
-  // construction
-  //
-  static createDebug (name) {
-    if (!this.cache.has(name)) this.cache.set(name, new Logger(name))
-    return this.cache.get(name).log
-  }
 
   constructor (name) {
     this.name = name
@@ -74,7 +77,8 @@ class Logger {
         : ''
     const str = format(...args)
     Logger.history.add({ when: now, who: this.name, log: str })
-    console.error(pfx + name + str + sfx)
+    const output = MSG_PREFIX + pfx + name + str + sfx
+    Debug.write(output)
   }
 }
 
@@ -143,7 +147,6 @@ function enableAll (onOff, pfx) {
 // -------------------------------------------
 // Exports
 
-const debug = Logger.createDebug.bind(Logger)
-debug.history = Logger.history
+Debug.history = Logger.history
 export { enableAll }
-export default debug
+export default Debug
