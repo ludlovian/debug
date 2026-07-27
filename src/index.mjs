@@ -1,34 +1,72 @@
 import process from 'node:process'
 import { format } from 'node:util'
 
-const isTTY = !!process.stderr && !!process.stderr.isTTY
-const isUnderSystemd = !!process.env.INVOCATION_ID || process.env.JOURNAL_STREAM
-const pfxDate =
-  !!process.env.DEBUG_ADD_DATE ||
-  (!isTTY && !isUnderSystemd && !process.env.DEBUG_HIDE_DATE)
-const sfxTime = isTTY && !pfxDate
+//  -----------------------------------------------------------------------
+//
+//  Debug / writing module
+//
+//  There are two main objects used
+//
+//    - Debug       - the sole default export
+//
+//      This is a function to create named loggers. All loggers sharing the
+//      same name are the same instance
+//
+//      It also contains environment level settings, and exposes the
+//      actual writing function.
+//
+//    - debug       - a logger function, created by Debug(name)
+//
+//      This is actually the Logger.log bound function. The Logger instance
+//      is available as debug.config
+//
+//    debug(...) acts like console.error(...) with these differences
+//
+//      - it is conditional on the logger being enabled
+//      - the name is prepended
+//      - if a tty, then colours the name
+//      - if a tty, then the time between messages is added
+//      - if under Systemd, then <6> is prepended to force note level
+//
+//    debug.error and Debug.error both point to a variant of console.error
+//
+//      - if under Systemd, then <3> is prepended to each line
+//
 
-const MSG_PREFIX = isUnderSystemd ? '<6>' : ''
-
-class LogHistory {
-  max = 100
-  items = []
-
-  add (data) {
-    const n = this.items.push(data)
-    if (n > this.max) this.items.splice(0, n - this.max)
-  }
-}
-
-function Debug (name) {
+export default function Debug (name) {
   if (!Logger.cache.has(name)) Logger.cache.set(name, new Logger(name))
   return Logger.cache.get(name).log
 }
 
-Debug.write = console.error.bind(console)
+Debug.isTTY = !!process.stderr && !!process.stderr.isTTY
+Debug.isUnderSystemd = !!process.env.INVOCATION_ID || process.env.JOURNAL_STREAM
+Debug.addDatePrefix =
+  !!process.env.DEBUG_ADD_DATE ||
+  (!Debug.isTTY && !Debug.isUnderSystemd && !process.env.DEBUG_HIDE_DATE)
+Debug.addTimeSuffix = Debug.isTTY && !Debug.addDatePrefix
+Debug.prefix = Debug.isUnderSystemd
+  ? { debug: '<6>', error: '<3>' }
+  : { debug: '', error: '' }
+
+Debug.write = function write (string) {
+  process.stderr.write(`${string}\n`)
+}
+
+const rgx = /^<[0-7]>/
+function addPrefix (string, pfx) {
+  if (!pfx) return string
+  return string
+    .split('\n')
+    .map(line => (line && !rgx.test(line) ? pfx + line : line))
+    .join('\n')
+}
+
+function error (...args) {
+  Debug.write(addPrefix(format(...args), Debug.prefix.error))
+}
+Debug.error = error
 
 class Logger {
-  static history = new LogHistory()
   static cache = new Map()
 
   name
@@ -40,13 +78,14 @@ class Logger {
 
   constructor (name) {
     this.name = name
-    this.colour = isTTY ? getColour() : undefined
+    this.colour = Debug.isTTY ? getColour() : undefined
     this.enabled = isEnabled(name)
     this.log = this.log.bind(this)
 
     Object.defineProperties(this.log, {
       config: { get: () => this },
-      enabled: { get: () => this.enabled, set: x => (this.enabled = !!x) }
+      enabled: { get: () => this.enabled, set: x => (this.enabled = !!x) },
+      error: { get: () => Debug.error }
     })
   }
 
@@ -67,18 +106,17 @@ class Logger {
     const last = this.#last
     this.#last = +now
     const useColour = this.#colour != null
-    const start = useColour ? this.#start : ''
-    const end = useColour ? this.#end : ''
-    const name = start + this.name + end + ' '
-    const pfx = pfxDate ? now.toISOString() + ' ' : ''
+    const s = useColour ? this.#start : ''
+    const e = useColour ? this.#end : ''
+    const name = useColour ? `${s}${this.name}${e} ` : `[${this.name}] `
+    const pfx = Debug.addDatePrefix ? now.toISOString() + ' ' : ''
     const sfx =
-      sfxTime && last != null
-        ? ` ${start}+${fmtTime(this.#last - last)}${end}`
+      Debug.addTimeSuffix && last != null
+        ? ` ${s}+${fmtTime(this.#last - last)}${e}`
         : ''
     const str = format(...args)
-    Logger.history.add({ when: now, who: this.name, log: str })
-    const output = MSG_PREFIX + pfx + name + str + sfx
-    Debug.write(output)
+    const output = pfx + name + str + sfx
+    Debug.write(addPrefix(output, Debug.prefix.debug))
   }
 }
 
@@ -137,16 +175,11 @@ function fmtTime (ms) {
   return ((ms / HR + 0.5) | 0) + 'h'
 }
 
-function enableAll (onOff, pfx) {
+export function enableAll (onOff, pfx) {
   for (const logger of Logger.cache.values()) {
     if (pfx && !logger.name.startsWith(pfx)) continue //
     logger.enabled = !!onOff
   }
 }
 
-// -------------------------------------------
-// Exports
-
-Debug.history = Logger.history
-export { enableAll }
-export default Debug
+Debug.enableAll = enableAll
