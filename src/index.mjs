@@ -1,5 +1,6 @@
 import process from 'node:process'
 import { format } from 'node:util'
+import Emitter from '@ludlovian/emitter'
 
 //  -----------------------------------------------------------------------
 //
@@ -29,8 +30,22 @@ import { format } from 'node:util'
 //      - if under Systemd, then <6> is prepended to force note level
 //
 //    debug.error and Debug.error both point to a variant of console.error
+//    debug.info and Debug.info point to a variant of console.log
 //
-//      - if under Systemd, then <3> is prepended to each line
+//  IPC and events
+//
+//  If a process.send available, then message objects will instead be sent
+//  via IPC to the parent
+//
+//  In either case, message objects will be emitted on the 'message' event.
+//  The main Debug function has .on .off .once and .emit
+//
+//  A message object has the following properties
+//  - type:           'debug'
+//  - level:          'debug', 'info', 'error'
+//  - name:           the logger name (for debug)
+//  - message:        the text of the message
+//  - ms:             the unixepoch ms time
 //
 
 export default function Debug (name) {
@@ -38,20 +53,39 @@ export default function Debug (name) {
   return Logger.cache.get(name).log
 }
 
+// Emitter
+const emitter = new Emitter()
+Debug.on = emitter.on
+Debug.once = emitter.once
+Debug.off = emitter.off
+Debug.emit = emitter.emit
+
+// Debug configuration
+
 Debug.isTTY = !!process.stderr && !!process.stderr.isTTY
-Debug.isUnderSystemd = !!process.env.INVOCATION_ID || process.env.JOURNAL_STREAM
+Debug.isUnderSystemd =
+  !!process.env.INVOCATION_ID || !!process.env.JOURNAL_STREAM
+Debug.isIPC = !!process.send
 Debug.addDatePrefix =
   !!process.env.DEBUG_ADD_DATE ||
   (!Debug.isTTY && !Debug.isUnderSystemd && !process.env.DEBUG_HIDE_DATE)
 Debug.addTimeSuffix = Debug.isTTY && !Debug.addDatePrefix
 Debug.prefix = Debug.isUnderSystemd
-  ? { debug: '<6>', error: '<3>' }
-  : { debug: '', error: '' }
+  ? { debug: '<7>', info: '<6>', error: '<3>' }
+  : { debug: '', info: '', error: '' }
 
 Debug.write = function write (string) {
   process.stderr.write(`${string}\n`)
 }
 
+// message object
+function createMessage ({ name, message, level }) {
+  const type = 'debug'
+  const ms = Date.now()
+  return { type, level, name, message, ms }
+}
+
+// add systemd prefix if not already set
 const rgx = /^<[0-7]>/
 function addPrefix (string, pfx) {
   if (!pfx) return string
@@ -61,19 +95,59 @@ function addPrefix (string, pfx) {
     .join('\n')
 }
 
-function error (...args) {
-  Debug.write(addPrefix(format(...args), Debug.prefix.error))
+// Common message writing / sending
+
+function outputMessage (msg, clr, last) {
+  if (Debug.isIPC) {
+    process.send(msg)
+  } else if (msg.level === 'error') {
+    Debug.write(addPrefix(msg.message, Debug.prefix.error))
+  } else if (msg.level === 'info') {
+    Debug.write(addPrefix(msg.message, Debug.prefix.info))
+  } else {
+    let str = ''
+    let start = ''
+    let end = ''
+    if (Debug.addDatePrefix) str += new Date(msg.ms).toISOString() + ' '
+    if (clr != null) {
+      ;[start, end] = getColourCodes(clr)
+      str += `${start}${msg.name}${end} `
+    } else {
+      str += `[${msg.name}]`
+    }
+    str += msg.message
+    if (Debug.addTimeSuffix && last != null) {
+      const tm = fmtTime(msg.ms - last)
+      str += ` ${start}${tm}${end}`
+    }
+    Debug.write(addPrefix(str, Debug.prefix.debug))
+  }
+  Debug.emit('message', msg)
 }
-Debug.error = error
+
+// console.error and console.log replacements
+
+Debug.error = function error (...args) {
+  const message = format(...args)
+  outputMessage(createMessage({ level: 'error', message }))
+}
+
+Debug.info = function info (...args) {
+  const message = format(...args)
+  outputMessage(createMessage({ level: 'info', message }))
+}
+
+// The debug Logger objects
+//
+// Acts as the specific configuration for a named logger function
+//
 
 class Logger {
   static cache = new Map()
 
   name
   #last
-  #start
-  #end
-  #colour
+  colour
   enabled
 
   constructor (name) {
@@ -85,38 +159,19 @@ class Logger {
     Object.defineProperties(this.log, {
       config: { get: () => this },
       enabled: { get: () => this.enabled, set: x => (this.enabled = !!x) },
-      error: { get: () => Debug.error }
+      colour: { get: () => this.colour, set: x => (this.colour = x) },
+      error: { get: () => Debug.error },
+      info: { get: () => Debug.info }
     })
   }
 
-  get colour () {
-    return this.#colour
-  }
-
-  set colour (c) {
-    this.#colour = c
-    const { start, end } = getColourCodes(c)
-    this.#start = start
-    this.#end = end
-  }
-
   log (...args) {
-    if (!this.enabled) return
-    const now = new Date()
+    if (!this.enabled) return undefined
+    const message = format(...args)
+    const msg = createMessage({ name: this.name, level: 'debug', message })
     const last = this.#last
-    this.#last = +now
-    const useColour = this.#colour != null
-    const s = useColour ? this.#start : ''
-    const e = useColour ? this.#end : ''
-    const name = useColour ? `${s}${this.name}${e} ` : `[${this.name}] `
-    const pfx = Debug.addDatePrefix ? now.toISOString() + ' ' : ''
-    const sfx =
-      Debug.addTimeSuffix && last != null
-        ? ` ${s}+${fmtTime(this.#last - last)}${e}`
-        : ''
-    const str = format(...args)
-    const output = pfx + name + str + sfx
-    Debug.write(addPrefix(output, Debug.prefix.debug))
+    this.#last = msg.ms
+    outputMessage(msg, this.colour, last)
   }
 }
 
@@ -150,7 +205,7 @@ function getColourCodes (c) {
   const CSI = '\x1b['
   const start = CSI + (c < 8 ? `${c + 30};1m` : `38;5;${c};1m`)
   const end = CSI + '39;22m'
-  return { start, end }
+  return [start, end]
 }
 
 const colours = '20,46,165,226,81,160,27,28,90,214,51,1,2,3,4,5,6'

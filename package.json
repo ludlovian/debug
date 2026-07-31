@@ -12,5 +12,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "Unlicense"
+  "license": "Unlicense",
+  "dependencies": {
+    "@ludlovian/emitter": "file:../emitter"
+  }
 }
