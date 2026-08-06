@@ -42,7 +42,7 @@ import Emitter from '@ludlovian/emitter'
 //
 //  A message object has the following properties
 //  - type:           'debug'
-//  - level:          'debug', 'info', 'error'
+//  - level:          0-7 (error=3, warn=4, info=6, debug=7)
 //  - name:           the logger name (for debug)
 //  - message:        the text of the message
 //  - ms:             the unixepoch ms time
@@ -70,9 +70,6 @@ Debug.addDatePrefix =
   !!process.env.DEBUG_ADD_DATE ||
   (!Debug.isTTY && !Debug.isUnderSystemd && !process.env.DEBUG_HIDE_DATE)
 Debug.addTimeSuffix = Debug.isTTY && !Debug.addDatePrefix
-Debug.prefix = Debug.isUnderSystemd
-  ? { debug: '<7>', info: '<6>', error: '<3>' }
-  : { debug: '', info: '', error: '' }
 
 Debug.write = function write (string) {
   process.stderr.write(`${string}\n`)
@@ -87,8 +84,9 @@ function createMessage ({ name, message, level }) {
 
 // add systemd prefix if not already set
 const rgx = /^<[0-7]>/
-function addPrefix (string, pfx) {
-  if (!pfx) return string
+function addPrefix (string, level) {
+  if (!Debug.isUnderSystemd) return string
+  const pfx = `<${level}>`
   return string
     .split('\n')
     .map(line => (line && !rgx.test(line) ? pfx + line : line))
@@ -100,10 +98,8 @@ function addPrefix (string, pfx) {
 function outputMessage (msg, clr, last) {
   if (Debug.isIPC) {
     process.send(msg)
-  } else if (msg.level === 'error') {
-    Debug.write(addPrefix(msg.message, Debug.prefix.error))
-  } else if (msg.level === 'info') {
-    Debug.write(addPrefix(msg.message, Debug.prefix.info))
+  } else if (msg.level < 7) {
+    Debug.write(addPrefix(msg.message, msg.level))
   } else {
     let str = ''
     let start = ''
@@ -120,7 +116,7 @@ function outputMessage (msg, clr, last) {
       const tm = fmtTime(msg.ms - last)
       str += ` ${start}${tm}${end}`
     }
-    Debug.write(addPrefix(str, Debug.prefix.debug))
+    Debug.write(addPrefix(str, 7))
   }
   Debug.emit('message', msg)
 }
@@ -129,12 +125,17 @@ function outputMessage (msg, clr, last) {
 
 Debug.error = function error (...args) {
   const message = format(...args)
-  outputMessage(createMessage({ level: 'error', message }))
+  outputMessage(createMessage({ level: 3, message }))
+}
+
+Debug.warn = function error (...args) {
+  const message = format(...args)
+  outputMessage(createMessage({ level: 4, message }))
 }
 
 Debug.info = function info (...args) {
   const message = format(...args)
-  outputMessage(createMessage({ level: 'info', message }))
+  outputMessage(createMessage({ level: 6, message }))
 }
 
 // The debug Logger objects
@@ -161,6 +162,7 @@ class Logger {
       enabled: { get: () => this.enabled, set: x => (this.enabled = !!x) },
       colour: { get: () => this.colour, set: x => (this.colour = x) },
       error: { get: () => Debug.error },
+      warn: { get: () => Debug.warn },
       info: { get: () => Debug.info }
     })
   }
@@ -168,7 +170,7 @@ class Logger {
   log (...args) {
     if (!this.enabled) return undefined
     const message = format(...args)
-    const msg = createMessage({ name: this.name, level: 'debug', message })
+    const msg = createMessage({ name: this.name, level: 7, message })
     const last = this.#last
     this.#last = msg.ms
     outputMessage(msg, this.colour, last)
